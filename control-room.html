@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Smoggy — Control Room</title>
+<meta name="description" content="Global observation control room: live flights, weather, cloud cover and contrail-formation zones on one map.">
+<link rel="icon" type="image/png" href="icon-512-5.png">
+<link rel="apple-touch-icon" href="icon-512-5.png">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+:root{
+  --black:#05070c;--dark:#0a0f1a;--dark2:#0d1525;--dark3:#1a2540;
+  --blue:#44aaff;--grn:#2BFF55;--yellow:#ffd84a;--white:#fff;--grey:#8899bb;
+  --border:rgba(68,170,255,.15);--red:#ff3b3b;
+}
+html,body{height:100%}
+body{background:var(--black);color:var(--white);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;overflow:hidden}
+#app{display:flex;flex-direction:column;height:100vh}
+
+/* header */
+.cr-header{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;
+  gap:12px;padding:10px 16px;background:rgba(5,7,12,.96);backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--border);z-index:20}
+.cr-logo{font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:18px;letter-spacing:1px;
+  text-decoration:none;white-space:nowrap}
+.cr-logo .b1{color:var(--blue)}.cr-logo .bo{color:var(--yellow)}.cr-logo .bw{color:var(--white)}
+.cr-logo .rm{color:var(--grey);font-size:12px;margin-left:6px}
+.cr-back{background:var(--dark2);border:1px solid var(--border);color:var(--white);
+  text-decoration:none;font-size:12px;padding:7px 13px;border-radius:16px;white-space:nowrap;
+  font-family:ui-monospace,monospace}
+.cr-back:hover{background:var(--dark3)}
+.cr-preview-tag{font-family:ui-monospace,monospace;font-size:9px;letter-spacing:1.5px;
+  color:var(--yellow);border:1px solid rgba(255,216,74,.4);border-radius:10px;padding:3px 8px}
+
+/* body: map + side panel */
+.cr-body{flex:1 1 auto;position:relative;overflow:hidden}
+#map{position:absolute;inset:0;background:#0a0f1a}
+
+/* layer toggles (top-left over map) */
+.cr-layers{position:absolute;top:12px;left:12px;z-index:15;display:flex;flex-direction:column;gap:6px}
+.cr-layer-btn{display:flex;align-items:center;gap:8px;background:rgba(5,7,12,.9);
+  border:1px solid var(--border);border-radius:12px;padding:8px 12px;cursor:pointer;
+  font-size:12px;color:var(--white);font-family:ui-monospace,monospace;letter-spacing:.5px;
+  backdrop-filter:blur(6px);min-width:150px}
+.cr-layer-btn .sw{width:34px;height:19px;border-radius:12px;background:#1c2b40;position:relative;flex-shrink:0;transition:.15s}
+.cr-layer-btn.on .sw{background:var(--grn)}
+.cr-layer-btn .sw::after{content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;
+  border-radius:50%;background:#fff;transition:.15s}
+.cr-layer-btn.on .sw::after{left:17px}
+.cr-layer-btn .dotc{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+
+/* legend / stats (bottom-left) */
+.cr-legend{position:absolute;bottom:12px;left:12px;z-index:15;
+  background:rgba(5,7,12,.9);border:1px solid var(--border);border-radius:14px;
+  padding:12px 14px;backdrop-filter:blur(6px);font-family:ui-monospace,monospace;max-width:230px}
+.cr-legend h4{font-size:10px;letter-spacing:1.5px;color:var(--grey);margin-bottom:9px;text-transform:uppercase}
+.cr-legend .row{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--white);margin-bottom:6px}
+.cr-legend .row:last-child{margin-bottom:0}
+.cr-legend .dotc{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.cr-legend .note{font-size:9px;color:var(--grey);margin-top:9px;line-height:1.5;opacity:.85}
+
+/* live stats strip (top-right) */
+.cr-stats{position:absolute;top:12px;right:12px;z-index:15;display:flex;flex-direction:column;gap:6px}
+.cr-stat{background:rgba(5,7,12,.9);border:1px solid var(--border);border-radius:12px;
+  padding:8px 12px;backdrop-filter:blur(6px);font-family:ui-monospace,monospace;min-width:120px}
+.cr-stat .k{font-size:8px;letter-spacing:1px;color:var(--grey);text-transform:uppercase}
+.cr-stat .v{font-size:16px;font-weight:800;margin-top:2px}
+.cr-stat .v.g{color:var(--grn)}.cr-stat .v.y{color:var(--yellow)}.cr-stat .v.b{color:var(--blue)}.cr-stat .v.r{color:var(--red)}
+
+/* info banner bottom */
+.cr-banner{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);z-index:14;
+  background:rgba(255,216,74,.1);border:1px solid rgba(255,216,74,.4);border-radius:12px;
+  padding:8px 16px;font-family:ui-monospace,monospace;font-size:10px;color:var(--yellow);
+  letter-spacing:.5px;white-space:nowrap;backdrop-filter:blur(6px)}
+@media(max-width:680px){
+  .cr-legend{max-width:170px;padding:9px 11px}
+  .cr-layer-btn{min-width:0;font-size:11px;padding:7px 9px}
+  .cr-layer-btn .txt{display:none}
+  .cr-stat{min-width:90px}
+  .cr-banner{font-size:8px;padding:6px 10px;bottom:8px}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="cr-header">
+    <a href="index.html" class="cr-logo"><span class="b1">sm</span><span class="bo">o</span><span class="b1">ggy</span><span class="bw">app</span><span class="rm">// CONTROL ROOM</span></a>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span class="cr-preview-tag">PREVIEW</span>
+      <a href="index.html" class="cr-back">← Back</a>
+    </div>
+  </div>
+
+  <div class="cr-body">
+    <div id="map"></div>
+
+    <!-- layer toggles -->
+    <div class="cr-layers">
+      <div class="cr-layer-btn on" id="lyFlights" onclick="toggleLayer('flights')">
+        <span class="dotc" style="background:var(--yellow)"></span>
+        <span class="txt">Flights</span>
+        <span class="sw" style="margin-left:auto"></span>
+      </div>
+      <div class="cr-layer-btn on" id="lyContrail" onclick="toggleLayer('contrail')">
+        <span class="dotc" style="background:var(--grn)"></span>
+        <span class="txt">Contrail zones</span>
+        <span class="sw" style="margin-left:auto"></span>
+      </div>
+      <div class="cr-layer-btn" id="lyClouds" onclick="toggleLayer('clouds')">
+        <span class="dotc" style="background:#cfe8ff"></span>
+        <span class="txt">Cloud cover</span>
+        <span class="sw" style="margin-left:auto"></span>
+      </div>
+      <div class="cr-layer-btn on" id="lyDensity" onclick="toggleLayer('density')">
+        <span class="dotc" style="background:var(--red)"></span>
+        <span class="txt">Flight density</span>
+        <span class="sw" style="margin-left:auto"></span>
+      </div>
+    </div>
+
+    <!-- live stats -->
+    <div class="cr-stats">
+      <div class="cr-stat"><div class="k">Flights tracked</div><div class="v y" id="stFlights">—</div></div>
+      <div class="cr-stat"><div class="k">Contrail zones</div><div class="v g" id="stZones">—</div></div>
+      <div class="cr-stat"><div class="k">High-density areas</div><div class="v r" id="stDense">—</div></div>
+    </div>
+
+    <!-- legend -->
+    <div class="cr-legend">
+      <h4>Legend</h4>
+      <div class="row"><span class="dotc" style="background:var(--yellow)"></span>Aircraft (live position)</div>
+      <div class="row"><span class="dotc" style="background:var(--grn)"></span>Likely contrail formation</div>
+      <div class="row"><span class="dotc" style="background:var(--red)"></span>High flight density</div>
+      <div class="row"><span class="dotc" style="background:#cfe8ff"></span>Cloud cover</div>
+      <div class="note">Preview with sample data. Live flight, weather &amp; contrail layers connect here in a future phase.</div>
+    </div>
+
+    <div class="cr-banner">⚠ PREVIEW · sample data — not live yet</div>
+  </div>
+</div>
+
+<script>
+// ── Control Room preview: mock data on a real map, ready to swap for live APIs ──
+var map = L.map('map',{zoomControl:true,attributionControl:false}).setView([48,10],4);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:12}).addTo(map);
+
+// layer groups
+var flightsLayer = L.layerGroup().addTo(map);
+var contrailLayer = L.layerGroup().addTo(map);
+var densityLayer = L.layerGroup().addTo(map);
+var cloudsLayer = L.layerGroup(); // off by default
+
+// ── SAMPLE DATA (replace with API feeds later) ──
+// Busy European corridors + a few global points, as illustrative sample positions.
+var sampleFlights = [
+  [51.5,-0.1],[48.9,2.35],[50.1,8.6],[52.5,13.4],[45.5,9.2],[40.4,-3.7],
+  [41.9,12.5],[52.4,4.9],[47.4,8.5],[59.3,18.1],[55.7,12.6],[48.2,16.4],
+  [53.4,-2.2],[43.3,5.4],[38.0,23.7],[50.8,4.4],[47.5,19.0],[60.2,24.9],
+  [41.0,28.9],[55.8,37.6],[40.7,-74.0],[34.0,-118.2],[35.7,139.7],[1.35,103.8],
+  [25.3,55.4],[19.1,72.9],[-33.9,151.2],[-23.5,-46.6],[30.0,31.2],[22.3,114.2]
+];
+var sampleContrailZones = [
+  [50.2,7.5,60000],[48.7,4.0,50000],[52.0,11.0,55000],[46.5,8.0,45000],
+  [51.0,-1.5,50000],[41.5,13.0,40000],[40.6,-73.9,70000],[35.6,139.6,60000],
+  [25.2,55.3,45000],[1.3,103.9,40000]
+];
+var sampleDensity = [
+  [50.5,6.0,90000],[51.4,-0.2,80000],[48.8,2.3,75000],[40.7,-74.0,95000],
+  [35.7,139.7,85000],[25.3,55.4,70000]
+];
+
+// ── render helpers ──
+function renderFlights(){
+  flightsLayer.clearLayers();
+  sampleFlights.forEach(function(p){
+    L.circleMarker([p[0],p[1]],{radius:4,color:'#ffd84a',weight:1,fillColor:'#ffd84a',fillOpacity:.95})
+      .addTo(flightsLayer);
+  });
+}
+function renderContrail(){
+  contrailLayer.clearLayers();
+  sampleContrailZones.forEach(function(z){
+    L.circle([z[0],z[1]],{radius:z[2],color:'#2BFF55',weight:1,fillColor:'#2BFF55',fillOpacity:.12})
+      .addTo(contrailLayer);
+  });
+}
+function renderDensity(){
+  densityLayer.clearLayers();
+  sampleDensity.forEach(function(d){
+    L.circle([d[0],d[1]],{radius:d[2],color:'#ff3b3b',weight:1,fillColor:'#ff3b3b',fillOpacity:.14})
+      .addTo(densityLayer);
+  });
+}
+function renderClouds(){
+  cloudsLayer.clearLayers();
+  // soft blobs to suggest cloud cover
+  var blobs=[[53,10,140000],[47,15,120000],[44,6,100000],[56,20,130000],[36,140,150000]];
+  blobs.forEach(function(b){
+    L.circle([b[0],b[1]],{radius:b[2],color:'#cfe8ff',weight:0,fillColor:'#cfe8ff',fillOpacity:.10})
+      .addTo(cloudsLayer);
+  });
+}
+
+renderFlights();renderContrail();renderDensity();renderClouds();
+
+// stats
+document.getElementById('stFlights').textContent = sampleFlights.length;
+document.getElementById('stZones').textContent = sampleContrailZones.length;
+document.getElementById('stDense').textContent = sampleDensity.length;
+
+// ── layer toggle ──
+function toggleLayer(name){
+  var map_={flights:['lyFlights',flightsLayer],contrail:['lyContrail',contrailLayer],
+            clouds:['lyClouds',cloudsLayer],density:['lyDensity',densityLayer]};
+  var entry=map_[name];if(!entry)return;
+  var btn=document.getElementById(entry[0]),layer=entry[1];
+  if(map.hasLayer(layer)){map.removeLayer(layer);btn.classList.remove('on');}
+  else{map.addLayer(layer);btn.classList.add('on');}
+}
+
+// gentle ambient motion: flights drift slightly to feel "live" (preview only)
+setInterval(function(){
+  if(!map.hasLayer(flightsLayer))return;
+  sampleFlights.forEach(function(p){
+    p[0]+=(Math.random()-0.5)*0.04;
+    p[1]+=(Math.random()-0.5)*0.06;
+  });
+  renderFlights();
+},2500);
+</script>
+</body>
+</html>
